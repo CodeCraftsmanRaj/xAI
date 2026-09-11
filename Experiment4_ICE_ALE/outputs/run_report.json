@@ -1,0 +1,84 @@
+{
+  "experiment_status": "completed",
+  "model": "RandomForestClassifier",
+  "dataset": "sklearn Breast Cancer Wisconsin Diagnostic",
+  "metrics": {
+    "accuracy": 0.9473684210526315,
+    "precision": 0.9583333333333334,
+    "recall": 0.9583333333333334,
+    "f1_score": 0.9583333333333334,
+    "roc_auc": 0.9930555555555556,
+    "confusion_matrix": [
+      [
+        39,
+        3
+      ],
+      [
+        3,
+        69
+      ]
+    ],
+    "test_samples": 114
+  },
+  "interpretability": {
+    "feature": "mean radius",
+    "ice": {
+      "grid_min": 9.06968,
+      "grid_max": 21.455999999999996,
+      "grid_points": 50,
+      "samples_plotted": 60,
+      "mean_probability_min": 0.6017840153720292,
+      "mean_probability_max": 0.6433538879404459
+    },
+    "ale": {
+      "bins_used": 20,
+      "ale_min": -0.010756779928760021,
+      "ale_max": 0.010043621111907606,
+      "bin_counts": [
+        6,
+        6,
+        5,
+        6,
+        5,
+        5,
+        7,
+        6,
+        5,
+        6,
+        6,
+        5,
+        5,
+        7,
+        5,
+        6,
+        6,
+        5,
+        6,
+        6
+      ],
+      "bin_edges": [
+        7.76,
+        9.5868,
+        10.633000000000001,
+        11.126500000000002,
+        11.624,
+        11.89,
+        12.18,
+        12.6365,
+        12.902000000000001,
+        13.285,
+        13.68,
+        13.8115,
+        14.388000000000002,
+        14.86,
+        15.14,
+        16.245,
+        17.522000000000002,
+        18.668000000000003,
+        19.439,
+        20.557000000000002,
+        27.42
+      ]
+    }
+  }
+}

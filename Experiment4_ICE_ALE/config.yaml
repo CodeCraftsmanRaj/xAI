@@ -1,0 +1,29 @@
+experiment:
+  name: "Experiment 4 - ICE and ALE"
+  random_state: 42
+
+data:
+  source: "sklearn.datasets.load_breast_cancer"
+  target_name: "target"
+  test_size: 0.20
+
+model:
+  type: "RandomForestClassifier"
+  n_estimators: 400
+  max_depth: null
+  min_samples_leaf: 2
+  max_features: "sqrt"
+  n_jobs: -1
+
+interpretability:
+  feature: "mean radius"
+  ice_points: 50
+  ice_samples: 60
+  ale_bins: 20
+
+paths:
+  model: "models/random_forest.joblib"
+  metrics: "outputs/metrics.json"
+  feature_info: "outputs/feature_info.json"
+  ice_plot: "outputs/plots/ice_mean_radius.png"
+  ale_plot: "outputs/plots/ale_mean_radius.png"
