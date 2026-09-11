@@ -1,0 +1,11 @@
+image,top1_class,top1_confidence,top5
+challenge_01_dog_sunglasses,Labrador retriever,47.00%,"Labrador retriever(47.0%), golden retriever(13.5%), Greater Swiss Mountain dog(4.4%), sunglasses(2.7%), ice lolly(2.4%)"
+challenge_02_laptop_forest,notebook,83.59%,"notebook(83.6%), laptop(12.9%), crossword puzzle(0.4%), solar dish(0.3%), screen(0.3%)"
+challenge_03_bird_camouflage,ruffed grouse,35.21%,"ruffed grouse(35.2%), quail(25.9%), partridge(19.5%), brambling(3.9%), prairie chicken(3.1%)"
+challenge_04_toy_car,cab,89.64%,"cab(89.6%), beach wagon(2.5%), car wheel(1.7%), sports car(1.5%), pickup(1.2%)"
+challenge_05_sketch_elephant,Indian elephant,58.15%,"Indian elephant(58.2%), tusker(23.4%), African elephant(18.2%), triceratops(0.1%), bloodhound(0.0%)"
+good_01_dog,golden retriever,91.70%,"golden retriever(91.7%), Labrador retriever(5.9%), Brittany spaniel(0.3%), kuvasz(0.3%), clumber(0.1%)"
+good_02_elephant,African elephant,52.13%,"African elephant(52.1%), tusker(46.5%), Indian elephant(1.3%), suit(0.0%), zebra(0.0%)"
+good_03_car,sports car,84.99%,"sports car(85.0%), car wheel(4.8%), racer(4.0%), grille(2.3%), beach wagon(1.1%)"
+good_04_eagle,bald eagle,99.95%,"bald eagle(99.9%), kite(0.1%), vulture(0.0%), hornbill(0.0%), albatross(0.0%)"
+good_05_coffee,espresso,94.63%,"espresso(94.6%), cup(4.8%), coffee mug(0.5%), eggnog(0.0%), soup bowl(0.0%)"

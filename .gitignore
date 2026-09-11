@@ -93,3 +93,6 @@ dist/
 *.tmp
 *.temp
 *.log
+
+Exp5_Project/ResNet18_Test_Images/
+Exp5_Project/frontend/node_modules
