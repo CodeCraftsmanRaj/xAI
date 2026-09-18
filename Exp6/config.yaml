@@ -1,0 +1,43 @@
+experiment:
+  name: "Experiment 6 - Explainability for Image Data using XRAI"
+  seed: 42
+  output_dir: "results"
+
+model:
+  name: "InceptionV3"
+  weights: "DEFAULT"
+  image_size: 299
+
+images:
+  names:
+    - astronaut
+    - coffee
+    - chelsea
+    - rocket
+
+  max_images: 4
+
+xrai:
+  integration_steps: 50
+  segmentation_scale: 100
+  segmentation_sigma: 0.8
+  segmentation_min_size: 50
+  top_region_percent: 20
+
+patch_search:
+  image_name: astronaut
+
+  patch_sizes:
+    - 20
+    - 30
+    - 40
+    - 50
+    - 60
+    - 75
+    - 90
+
+  stride: 10
+
+visualization:
+  dpi: 150
+  cmap: inferno
