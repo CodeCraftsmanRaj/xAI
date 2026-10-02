@@ -12,9 +12,15 @@ model:
 
 data:
   image_dir: "data/images"
-  extensions: [".jpg", ".jpeg", ".png"]
+  extensions:
+    - ".jpg"
+    - ".jpeg"
+    - ".png"
   use_bundled_examples: true
-  example_names: ["cat", "coffee", "astronaut"]
+  example_names:
+    - "dog1"
+    - "dog2"
+    - "dog3"
 
 lime:
   explainer: "LimeImageExplainer"
@@ -28,14 +34,22 @@ lime:
     sigma: 1
     start_label: 0
   disagreement:
-    candidate_num_segments: [40, 80, 120]
+    candidate_num_segments:
+      - 40
+      - 80
+      - 120
     candidate_num_samples: 1200
     min_fidelity_r2: 0.10
     min_disagreement: 0.20
     top_segments: 10
 
 prediction_test:
-  fractions: [0.10, 0.20, 0.30, 0.40, 0.50]
+  fractions:
+    - 0.10
+    - 0.20
+    - 0.30
+    - 0.40
+    - 0.50
   baseline_mode: "blur"
   blur_radius: 8
   compare_top_segments: 10
