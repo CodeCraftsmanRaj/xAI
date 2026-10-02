@@ -1,0 +1,42 @@
+experiment:
+  name: "Experiment 8 - LIME"
+  seed: 42
+  device: "auto"
+  top_k_classes: 5
+  output_dir: "results"
+
+model:
+  architecture: "resnet50"
+  pretrained: true
+  batch_size: 16
+
+data:
+  image_dir: "data/images"
+  extensions: [".jpg", ".jpeg", ".png"]
+  use_bundled_examples: true
+  example_names: ["cat", "coffee", "astronaut"]
+
+lime:
+  explainer: "LimeImageExplainer"
+  hide_color: 0
+  positive_only: true
+  num_features: 12
+  num_samples: 1200
+  segmentation:
+    algorithm: "slic"
+    compactness: 10
+    sigma: 1
+    start_label: 0
+  disagreement:
+    candidate_num_segments: [40, 80, 120]
+    candidate_num_samples: 1200
+    min_fidelity_r2: 0.10
+    min_disagreement: 0.20
+    top_segments: 10
+
+prediction_test:
+  fractions: [0.10, 0.20, 0.30, 0.40, 0.50]
+  baseline_mode: "blur"
+  blur_radius: 8
+  compare_top_segments: 10
+  decision_margin: 0.05
