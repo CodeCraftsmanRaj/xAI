@@ -1,0 +1,12 @@
+model_name: "distilbert/distilbert-base-uncased-finetuned-sst-2-english"
+
+sentences:
+  - "The plot was weak, but the acting was wonderful."
+  - "The movie was not good, not good at all, despite the beautiful soundtrack."
+
+explained_label: "POSITIVE"
+num_samples_full: 1000
+num_samples_small: 100
+random_seed: 42
+batch_size: 16
+output_dir: "results"
