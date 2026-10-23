@@ -1,6 +1,4 @@
 from pathlib import Path
-import html
-import json
 import logging
 import random
 
@@ -15,23 +13,90 @@ def probability_dict(probabilities, id2label):
     return {id2label[i]: float(probabilities[i]) for i in range(len(probabilities))}
 
 
-def run_lime(explainer, predictor, sentence, positive_idx, num_samples, num_features):
-    explanation = explainer.explain_instance(
-        sentence,
-        predictor.predict_proba,
-        labels=(positive_idx,),
-        num_samples=int(num_samples),
-        num_features=max(1, int(num_features)),
-    )
+def run_lime(
+    explainer,
+    predictor,
+    sentence,
+    positive_idx,
+    num_samples,
+    num_features,
+    output_dir,
+    sentence_number,
+):
+    """
+    Run LIME and save the actual per-perturbation distances and kernel weights.
+
+    LIME's TextDomainMapper creates the perturbed text representations and
+    distances. LimeTextExplainer then passes distances to LimeBase, which
+    applies the configured kernel function. We wrap that kernel function to
+    record the exact distance -> proximity-weight values used by LIME.
+    """
+    proximity_records = []
+    original_kernel = explainer.base.kernel_fn
+
+    def recording_kernel(distances):
+        proximity = original_kernel(distances)
+        distance_values = np.asarray(distances).reshape(-1)
+        proximity_values = np.asarray(proximity).reshape(-1)
+
+        for i, (distance, weight) in enumerate(
+            zip(distance_values, proximity_values)
+        ):
+            proximity_records.append(
+                {
+                    "sentence_number": sentence_number,
+                    "original_sentence": sentence,
+                    "num_samples": int(num_samples),
+                    "perturbation_index": i,
+                    "distance": float(distance),
+                    "proximity_weight": float(weight),
+                }
+            )
+        return proximity
+
+    # Temporarily wrap the kernel used by LIME, preserving its exact behavior.
+    explainer.base.kernel_fn = recording_kernel
+    try:
+        explanation = explainer.explain_instance(
+            sentence,
+            predictor.predict_proba,
+            labels=(positive_idx,),
+            num_samples=int(num_samples),
+            num_features=max(1, int(num_features)),
+        )
+    finally:
+        explainer.base.kernel_fn = original_kernel
+
     weights = explanation.as_list(label=positive_idx)
     score_df = pd.DataFrame(weights, columns=["word", "lime_weight"])
     score_df["num_samples"] = int(num_samples)
     score_df["explained_label"] = "POSITIVE"
-    return explanation, score_df
+
+    # Save actual per-sample proximity weights used during this LIME run.
+    proximity_df = pd.DataFrame(proximity_records)
+    if not proximity_df.empty:
+        proximity_df["perturbed_sentence"] = [
+            record["sentence"]
+            for record in predictor.call_records[-len(proximity_df):]
+        ] if len(predictor.call_records) >= len(proximity_df) else ""
+        output_dir.mkdir(parents=True, exist_ok=True)
+        file_path = output_dir / f"lime_proximity_weights_{num_samples}_{sentence_number}.csv"
+        proximity_df.to_csv(file_path, index=False)
+
+        # Also create a combined file across all runs by appending safely.
+        combined_path = output_dir / "lime_proximity_weights.csv"
+        if combined_path.exists():
+            existing = pd.read_csv(combined_path)
+            combined = pd.concat([existing, proximity_df], ignore_index=True)
+        else:
+            combined = proximity_df
+        combined.to_csv(combined_path, index=False)
+
+    return explanation, score_df, proximity_df
 
 
 def token_words(sentence):
-    # A whitespace-based token list makes the remove-one-word experiment transparent.
+    # Whitespace tokenization keeps the remove-one-word test transparent.
     return sentence.split()
 
 
@@ -39,28 +104,42 @@ def remove_one_word_experiment(sentence, predictor, id2label, positive_idx):
     words = token_words(sentence)
     rows = []
     base = predictor.predict_proba([sentence])[0]
-    rows.append({
-        "removed_word": "(none — original)",
-        "sentence": sentence,
-        **{f"probability_{label.lower()}": float(base[idx]) for idx, label in id2label.items()},
-        "change_in_positive_probability": 0.0,
-    })
+    rows.append(
+        {
+            "removed_word": "(none — original)",
+            "sentence": sentence,
+            **{
+                f"probability_{label.lower()}": float(base[idx])
+                for idx, label in id2label.items()
+            },
+            "change_in_positive_probability": 0.0,
+        }
+    )
     for i, word in enumerate(words):
-        remaining = words[:i] + words[i + 1:]
+        remaining = words[:i] + words[i + 1 :]
         changed = " ".join(remaining)
         probs = predictor.predict_proba([changed])[0]
-        rows.append({
-            "removed_word": word,
-            "word_position": i,
-            "sentence": changed,
-            **{f"probability_{label.lower()}": float(probs[idx]) for idx, label in id2label.items()},
-            "change_in_positive_probability": float(probs[positive_idx] - base[positive_idx]),
-        })
+        rows.append(
+            {
+                "removed_word": word,
+                "word_position": i,
+                "sentence": changed,
+                **{
+                    f"probability_{label.lower()}": float(probs[idx])
+                    for idx, label in id2label.items()
+                },
+                "change_in_positive_probability": float(
+                    probs[positive_idx] - base[positive_idx]
+                ),
+            }
+        )
     return pd.DataFrame(rows)
 
 
-def select_perturbations(sentence, predictor, positive_idx, id2label, random_seed, records):
-    # Use only inputs logged during this sentence's full-sample LIME run.
+def select_perturbations(
+    sentence, predictor, positive_idx, id2label, random_seed, records
+):
+    """Select examples from only the current sentence's LIME prediction inputs."""
     seen = set()
     candidates = []
     for record in records:
@@ -68,34 +147,49 @@ def select_perturbations(sentence, predictor, positive_idx, id2label, random_see
         if text != sentence and text not in seen:
             seen.add(text)
             candidates.append(text)
+
     if not candidates:
         return pd.DataFrame()
 
     probs = predictor.predict_proba_without_logging(candidates)
-    label = id2label[positive_idx].lower()
     rows = []
     for text, prob in zip(candidates, probs):
-        rows.append({
-            "kind": "changed_copy",
-            "sentence": text,
-            **{f"probability_{name.lower()}": float(prob[idx]) for idx, name in id2label.items()},
-            "positive_probability": float(prob[positive_idx]),
-        })
+        rows.append(
+            {
+                "kind": "changed_copy",
+                "sentence": text,
+                **{
+                    f"probability_{name.lower()}": float(prob[idx])
+                    for idx, name in id2label.items()
+                },
+                "positive_probability": float(prob[positive_idx]),
+            }
+        )
     frame = pd.DataFrame(rows)
     rng = random.Random(random_seed)
     random_count = min(8, len(frame))
     random_indices = set(rng.sample(list(frame.index), random_count))
-    selected = []
-    selected.append({
-        "kind": "original",
-        "sentence": sentence,
-        **{f"probability_{name.lower()}": float(predictor.predict_proba_without_logging([sentence])[0][idx])
-           for idx, name in id2label.items()},
-    })
+
+    original_probs = predictor.predict_proba_without_logging([sentence])[0]
+    selected = [
+        {
+            "kind": "original",
+            "sentence": sentence,
+            **{
+                f"probability_{name.lower()}": float(original_probs[idx])
+                for idx, name in id2label.items()
+            },
+        }
+    ]
+
     for idx in sorted(random_indices):
         row = frame.loc[idx].to_dict()
-        row["kind"] = f"random_changed_{len([r for r in selected if str(r['kind']).startswith('random_changed_')]) + 1}"
+        row["kind"] = (
+            f"random_changed_"
+            f"{len([r for r in selected if str(r['kind']).startswith('random_changed_')]) + 1}"
+        )
         selected.append(row)
+
     lowest = frame.nsmallest(min(3, len(frame)), "positive_probability")
     highest = frame.nlargest(min(3, len(frame)), "positive_probability")
     for rank, (_, row) in enumerate(lowest.iterrows(), 1):
@@ -112,11 +206,18 @@ def select_perturbations(sentence, predictor, positive_idx, id2label, random_see
 def run_experiment(config, tokenizer, model, device, id2label, label2id, logger):
     output_dir = Path(config.get("output_dir", "results"))
     output_dir.mkdir(parents=True, exist_ok=True)
+
     positive_idx = label2id.get(str(config.get("explained_label", "POSITIVE")).upper())
     if positive_idx is None:
-        raise ValueError(f"Configured explained label is missing. Available labels: {label2id}")
+        raise ValueError(
+            f"Configured explained label is missing. Available labels: {label2id}"
+        )
+
     predictor = SentimentPredictor(
-        tokenizer, model, device, id2label,
+        tokenizer,
+        model,
+        device,
+        id2label,
         batch_size=config.get("batch_size", 16),
     )
     explainer = LimeTextExplainer(
@@ -137,32 +238,49 @@ def run_experiment(config, tokenizer, model, device, id2label, label2id, logger)
 
         full_n = int(config.get("num_samples_full", 1000))
         small_n = int(config.get("num_samples_small", 100))
-        full_run_log_start = len(predictor.call_records)
-        full_exp, full_scores = run_lime(
-            explainer, predictor, sentence, positive_idx, full_n,
+
+        full_exp, full_scores, full_proximity = run_lime(
+            explainer,
+            predictor,
+            sentence,
+            positive_idx,
+            full_n,
             num_features=max(1, len(sentence.split())),
+            output_dir=output_dir,
+            sentence_number=sentence_number,
         )
         full_scores.insert(0, "sentence", sentence)
-        full_scores.to_csv(output_dir / f"lime_scores_{full_n}_{sentence_number}.csv", index=False)
-
-        # Keep the first sentence's score file under the exact requested friendly name.
+        full_scores.to_csv(
+            output_dir / f"lime_scores_{full_n}_{sentence_number}.csv", index=False
+        )
         if sentence_number == 1:
             full_scores.to_csv(output_dir / f"lime_scores_{full_n}.csv", index=False)
 
-        small_exp, small_scores = run_lime(
-            explainer, predictor, sentence, positive_idx, small_n,
+        small_exp, small_scores, small_proximity = run_lime(
+            explainer,
+            predictor,
+            sentence,
+            positive_idx,
+            small_n,
             num_features=max(1, len(sentence.split())),
+            output_dir=output_dir,
+            sentence_number=sentence_number,
         )
         small_scores.insert(0, "sentence", sentence)
-        small_scores.to_csv(output_dir / f"lime_scores_{small_n}_{sentence_number}.csv", index=False)
+        small_scores.to_csv(
+            output_dir / f"lime_scores_{small_n}_{sentence_number}.csv", index=False
+        )
         if sentence_number == 1:
             small_scores.to_csv(output_dir / f"lime_scores_{small_n}.csv", index=False)
 
-        full_run_records = predictor.call_records[full_run_log_start:]
+        full_records = predictor.call_records[-full_n:]
         selected = select_perturbations(
-            sentence, predictor, positive_idx, id2label,
+            sentence,
+            predictor,
+            positive_idx,
+            id2label,
             int(config.get("random_seed", 42)) + sentence_number,
-            full_run_records,
+            full_records,
         )
         selected.insert(0, "source_sentence_number", sentence_number)
         selected.to_csv(
@@ -171,9 +289,13 @@ def run_experiment(config, tokenizer, model, device, id2label, label2id, logger)
         if sentence_number == 1:
             selected.to_csv(output_dir / "selected_perturbations.csv", index=False)
 
-        remove_df = remove_one_word_experiment(sentence, predictor, id2label, positive_idx)
+        remove_df = remove_one_word_experiment(
+            sentence, predictor, id2label, positive_idx
+        )
         remove_df.insert(0, "source_sentence_number", sentence_number)
-        remove_df.to_csv(output_dir / f"remove_one_word_{sentence_number}.csv", index=False)
+        remove_df.to_csv(
+            output_dir / f"remove_one_word_{sentence_number}.csv", index=False
+        )
         if sentence_number == 1:
             remove_df.to_csv(output_dir / "remove_one_word.csv", index=False)
 
@@ -183,45 +305,69 @@ def run_experiment(config, tokenizer, model, device, id2label, label2id, logger)
             full_exp.save_to_file(str(output_dir / "lime_explanation.html"))
 
         sorted_scores = sorted(
-            [(str(word), float(weight)) for word, weight in full_exp.as_list(label=positive_idx)],
+            [
+                (str(word), float(weight))
+                for word, weight in full_exp.as_list(label=positive_idx)
+            ],
             key=lambda pair: pair[1],
         )
         largest_negative = sorted_scores[0] if sorted_scores else ("", 0.0)
         largest_positive = sorted_scores[-1] if sorted_scores else ("", 0.0)
 
-        # Rank comparisons: align by word where possible; report rank correlation where defined.
         full_rank = full_scores[["word", "lime_weight"]].copy()
         small_rank = small_scores[["word", "lime_weight"]].copy()
-        rank_merge = full_rank.merge(small_rank, on="word", suffixes=("_full", "_small"))
+        rank_merge = full_rank.merge(
+            small_rank, on="word", suffixes=("_full", "_small")
+        )
         rank_corr = None
         if len(rank_merge) >= 2:
-            corr = rank_merge["lime_weight_full"].corr(rank_merge["lime_weight_small"], method="spearman")
+            corr = rank_merge["lime_weight_full"].corr(
+                rank_merge["lime_weight_small"], method="spearman"
+            )
             rank_corr = float(corr) if pd.notna(corr) else None
 
-        sentence_results.append({
-            "sentence": sentence,
-            "original_probabilities": original_dict,
-            "explained_label": id2label[positive_idx],
-            "lime_samples_full": full_n,
-            "lime_samples_small": small_n,
-            "largest_positive_word": {"word": largest_positive[0], "weight": largest_positive[1]},
-            "largest_negative_word": {"word": largest_negative[0], "weight": largest_negative[1]},
-            "lime_scores_full": [
-                {"word": str(w), "weight": float(s)}
-                for w, s in full_scores[["word", "lime_weight"]].itertuples(index=False, name=None)
-            ],
-            "lime_scores_small": [
-                {"word": str(w), "weight": float(s)}
-                for w, s in small_scores[["word", "lime_weight"]].itertuples(index=False, name=None)
-            ],
-            "full_vs_small_spearman_rank_correlation_on_shared_words": rank_corr,
-            "remove_one_word_csv": f"remove_one_word_{sentence_number}.csv",
-            "selected_perturbations_csv": f"selected_perturbations_{sentence_number}.csv",
-            "lime_html": html_path.name,
-        })
+        sentence_results.append(
+            {
+                "sentence": sentence,
+                "original_probabilities": original_dict,
+                "explained_label": id2label[positive_idx],
+                "lime_samples_full": full_n,
+                "lime_samples_small": small_n,
+                "largest_positive_word": {
+                    "word": largest_positive[0],
+                    "weight": largest_positive[1],
+                },
+                "largest_negative_word": {
+                    "word": largest_negative[0],
+                    "weight": largest_negative[1],
+                },
+                "lime_scores_full": [
+                    {"word": str(w), "weight": float(s)}
+                    for w, s in full_scores[
+                        ["word", "lime_weight"]
+                    ].itertuples(index=False, name=None)
+                ],
+                "lime_scores_small": [
+                    {"word": str(w), "weight": float(s)}
+                    for w, s in small_scores[
+                        ["word", "lime_weight"]
+                    ].itertuples(index=False, name=None)
+                ],
+                "full_vs_small_spearman_rank_correlation_on_shared_words": rank_corr,
+                "remove_one_word_csv": f"remove_one_word_{sentence_number}.csv",
+                "selected_perturbations_csv": (
+                    f"selected_perturbations_{sentence_number}.csv"
+                ),
+                "lime_html": html_path.name,
+                "proximity_weights_full_csv": (
+                    f"lime_proximity_weights_{full_n}_{sentence_number}.csv"
+                ),
+                "proximity_weights_small_csv": (
+                    f"lime_proximity_weights_{small_n}_{sentence_number}.csv"
+                ),
+            }
+        )
 
-    # Export the complete record of all sentences passed into the LIME prediction callback.
-    # Probability columns are calculated afterward without expanding the call log.
     predictor.call_log_frame().to_csv(output_dir / "model_calls.csv", index=False)
 
     return {
@@ -233,7 +379,7 @@ def run_experiment(config, tokenizer, model, device, id2label, label2id, logger)
         "model_call_count": len(predictor.call_records),
         "notes": [
             "model_calls.csv logs every text passed to the prediction callback, including repeated inputs.",
-            "The selected perturbation file deduplicates changed sentences for readability.",
+            "LIME proximity weights are recorded from the exact configured kernel function.",
             "LIME weights explain the configured label locally; they are not probabilities or causal effects.",
             "Remove-one-word results are direct model predictions and may differ from LIME's local surrogate ranking.",
         ],
